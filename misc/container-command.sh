@@ -38,30 +38,78 @@ echo "Loading..."
 echo -e "${BL}[Info]${GN} Getting container list...${CL}"
 
 # Prepare for whiptail container selection
-CONTAINERS=()
+CONTAINER_IDS=()
+CONTAINER_NAMES=()
+SELECT_STATUS=()
 MSG_MAX_LENGTH=0
 
+# Add actual containers to arrays
 while read -r TAG ITEM REST; do
   OFFSET=2
   DISPLAY="$TAG: $ITEM"
   ((${#DISPLAY} + OFFSET > MSG_MAX_LENGTH)) && MSG_MAX_LENGTH=${#DISPLAY}+OFFSET
-  CONTAINERS+=("$TAG" "$DISPLAY" "ON")
+  CONTAINER_IDS+=("$TAG")
+  CONTAINER_NAMES+=("$DISPLAY")
+  SELECT_STATUS+=("ON")
 done < <(pct list | awk 'NR>1 {printf "%s %s\n", $1, $2}')
 
-if [ ${#CONTAINERS[@]} -eq 0 ]; then
+if [ ${#CONTAINER_IDS[@]} -eq 0 ]; then
   echo -e "${RD}[Error]${CL} No containers found."
   exit 1
 fi
 
-# Let user select containers to run the command on
-SELECTED_CONTAINERS=$(whiptail --backtitle "Container Command Runner" \
-  --title "Select Containers" \
-  --checklist "\nSelect containers to run the command on:" \
-  16 $((MSG_MAX_LENGTH + 60)) 8 \
-  "${CONTAINERS[@]}" 3>&1 1>&2 2>&3) || exit 1
+# Container selection loop
+while true; do
+  # Build the menu items with current selection status
+  MENU_ITEMS=()
+  MENU_ITEMS+=("SELECTALL" "--- SELECT ALL CONTAINERS ---" "")
+  MENU_ITEMS+=("DESELECTALL" "--- DESELECT ALL CONTAINERS ---" "")
+  MENU_ITEMS+=("CONTINUE" "--- CONTINUE WITH CURRENT SELECTION ---" "")
 
-# Clean up container IDs (remove quotes)
-SELECTED_CONTAINERS=$(echo "$SELECTED_CONTAINERS" | tr -d '"')
+  # Add containers with their current select status
+  for i in "${!CONTAINER_IDS[@]}"; do
+    MENU_ITEMS+=("${CONTAINER_IDS[i]}" "${CONTAINER_NAMES[i]}" "${SELECT_STATUS[i]}")
+  done
+
+  # Show the checklist
+  CHOICE=$(whiptail --backtitle "Container Command Runner" \
+    --title "Select Containers" \
+    --checklist "\nSelect containers or use the actions at the top:" \
+    20 $((MSG_MAX_LENGTH + 60)) 12 \
+    "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3) || exit 1
+
+  # Clean up container IDs (remove quotes)
+  CHOICE=$(echo "$CHOICE" | tr -d '"')
+
+  # Process special actions
+  if [[ "$CHOICE" == *"SELECTALL"* ]]; then
+    # Select all containers
+    for i in "${!SELECT_STATUS[@]}"; do
+      SELECT_STATUS[i]="ON"
+    done
+    continue
+  elif [[ "$CHOICE" == *"DESELECTALL"* ]]; then
+    # Deselect all containers
+    for i in "${!SELECT_STATUS[@]}"; do
+      SELECT_STATUS[i]="OFF"
+    done
+    continue
+  elif [[ "$CHOICE" == *"CONTINUE"* ]]; then
+    # Process selected containers
+    SELECTED_CONTAINERS=""
+    for i in "${!CONTAINER_IDS[@]}"; do
+      if [[ "${SELECT_STATUS[i]}" == "ON" ]]; then
+        SELECTED_CONTAINERS+="${CONTAINER_IDS[i]} "
+      fi
+    done
+    SELECTED_CONTAINERS="${SELECTED_CONTAINERS% }" # Remove trailing space
+    break
+  else
+    # Use direct selection from user
+    SELECTED_CONTAINERS=$CHOICE
+    break
+  fi
+done
 
 if [ -z "$SELECTED_CONTAINERS" ]; then
   echo -e "${RD}[Warning]${CL} No containers selected. Exiting."
@@ -90,14 +138,14 @@ echo -e "${BL}[Info]${GN} Executing command on selected containers...${CL}\n"
 
 for container in $SELECTED_CONTAINERS; do
   status=$(pct status $container)
-  
+
   if [ "$status" == "status: stopped" ]; then
     echo -e "${YW}[Warning]${CL} Container ${BL}$container${CL} is stopped. Skipping."
     continue
   fi
-  
+
   echo -e "${BL}[Info]${GN} Running command on container ${BL}$container${CL}:${CL}"
-  
+
   # Execute the command and capture output
   if OUTPUT=$(pct exec "$container" -- bash -c "$COMMAND" 2>&1); then
     echo -e "${GN}[Success]${CL} Command executed on ${BL}$container${CL}${GN} successfully${CL}"
