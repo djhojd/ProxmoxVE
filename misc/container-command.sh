@@ -50,7 +50,6 @@ while read -r TAG ITEM REST; do
   ((${#DISPLAY} + OFFSET > MSG_MAX_LENGTH)) && MSG_MAX_LENGTH=${#DISPLAY}+OFFSET
   CONTAINER_IDS+=("$TAG")
   CONTAINER_NAMES+=("$DISPLAY")
-  SELECT_STATUS+=("ON")
 done < <(pct list | awk 'NR>1 {printf "%s %s\n", $1, $2}')
 
 if [ ${#CONTAINER_IDS[@]} -eq 0 ]; then
@@ -58,64 +57,99 @@ if [ ${#CONTAINER_IDS[@]} -eq 0 ]; then
   exit 1
 fi
 
-# Container selection loop
-while true; do
-  # Build the menu items with current selection status
-  MENU_ITEMS=()
-  MENU_ITEMS+=("SELECTALL" "--- SELECT ALL CONTAINERS ---" "OFF")
-  MENU_ITEMS+=("DESELECTALL" "--- DESELECT ALL CONTAINERS ---" "OFF")
-  MENU_ITEMS+=("CONTINUE" "--- CONTINUE WITH CURRENT SELECTION ---" "OFF")
-
-  # Add containers with their current select status
+# Ask if user wants to select all containers
+if whiptail --backtitle "Container Command Runner" \
+  --title "Container Selection" \
+  --yesno "\nDo you want to select all containers?" 10 60; then
+  # User chose Yes - select all containers
   for i in "${!CONTAINER_IDS[@]}"; do
-    MENU_ITEMS+=("${CONTAINER_IDS[i]}" "${CONTAINER_NAMES[i]}" "${SELECT_STATUS[i]}")
+    SELECT_STATUS+=("ON")
   done
 
-  # Show the checklist
-  CHOICE=$(whiptail --backtitle "Container Command Runner" \
-    --title "Select Containers" \
-    --checklist "\nSelect containers or use the actions at the top:" \
+  # Show a confirmation with all containers selected
+  MENU_ITEMS=()
+  for i in "${!CONTAINER_IDS[@]}"; do
+    MENU_ITEMS+=("${CONTAINER_IDS[i]}" "${CONTAINER_NAMES[i]}" "ON")
+  done
+
+  whiptail --backtitle "Container Command Runner" \
+    --title "Selected Containers" \
+    --checklist "\nThe following containers will be used (press OK to continue):" \
     20 $((MSG_MAX_LENGTH + 60)) 12 \
-    "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3) || exit 1
+    "${MENU_ITEMS[@]}" --separate-output 3>&1 1>&2 2>&3
 
-  # Clean up container IDs (remove quotes)
-  CHOICE=$(echo "$CHOICE" | tr -d '"')
+  # Create the list of selected containers
+  SELECTED_CONTAINERS=""
+  for container in "${CONTAINER_IDS[@]}"; do
+    SELECTED_CONTAINERS+="$container "
+  done
+  SELECTED_CONTAINERS="${SELECTED_CONTAINERS% }" # Remove trailing space
 
-  # Process special actions
-  if [[ "$CHOICE" == *"SELECTALL"* ]]; then
-    # Select all containers
-    for i in "${!SELECT_STATUS[@]}"; do
-      SELECT_STATUS[i]="ON"
-    done
-    continue
-  elif [[ "$CHOICE" == *"DESELECTALL"* ]]; then
-    # Deselect all containers
-    for i in "${!SELECT_STATUS[@]}"; do
-      SELECT_STATUS[i]="OFF"
-    done
-    continue
-  elif [[ "$CHOICE" == *"CONTINUE"* ]]; then
-    # Process selected containers based on current SELECT_STATUS
-    SELECTED_CONTAINERS=""
+else
+  # User chose No - set all containers to OFF initially
+  for i in "${!CONTAINER_IDS[@]}"; do
+    SELECT_STATUS+=("OFF")
+  done
+
+  # Container selection loop
+  while true; do
+    # Build the menu items with current selection status
+    MENU_ITEMS=()
+    MENU_ITEMS+=("SELECTALL" "--- SELECT ALL CONTAINERS ---" "OFF")
+    MENU_ITEMS+=("DESELECTALL" "--- DESELECT ALL CONTAINERS ---" "OFF")
+    MENU_ITEMS+=("CONTINUE" "--- CONTINUE WITH CURRENT SELECTION ---" "OFF")
+
+    # Add containers with their current select status
     for i in "${!CONTAINER_IDS[@]}"; do
-      if [[ "${SELECT_STATUS[i]}" == "ON" ]]; then
-        SELECTED_CONTAINERS+="${CONTAINER_IDS[i]} "
-      fi
+      MENU_ITEMS+=("${CONTAINER_IDS[i]}" "${CONTAINER_NAMES[i]}" "${SELECT_STATUS[i]}")
     done
-    SELECTED_CONTAINERS="${SELECTED_CONTAINERS% }" # Remove trailing space
-    break
-  else
-    # Update selection status based on user's choices
-    for i in "${!CONTAINER_IDS[@]}"; do
-      if [[ "$CHOICE" == *"${CONTAINER_IDS[i]}"* ]]; then
+
+    # Show the checklist
+    CHOICE=$(whiptail --backtitle "Container Command Runner" \
+      --title "Select Containers" \
+      --checklist "\nSelect containers or use the actions at the top:" \
+      20 $((MSG_MAX_LENGTH + 60)) 12 \
+      "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3) || exit 1
+
+    # Clean up container IDs (remove quotes)
+    CHOICE=$(echo "$CHOICE" | tr -d '"')
+
+    # Process special actions
+    if [[ "$CHOICE" == *"SELECTALL"* ]]; then
+      # Select all containers
+      for i in "${!SELECT_STATUS[@]}"; do
         SELECT_STATUS[i]="ON"
-      else
+      done
+      continue
+    elif [[ "$CHOICE" == *"DESELECTALL"* ]]; then
+      # Deselect all containers
+      for i in "${!SELECT_STATUS[@]}"; do
         SELECT_STATUS[i]="OFF"
-      fi
-    done
-    continue # Show the menu again with updated selections
-  fi
-done
+      done
+      continue
+    elif [[ "$CHOICE" == *"CONTINUE"* ]]; then
+      # Process selected containers based on current SELECT_STATUS
+      SELECTED_CONTAINERS=""
+      for i in "${!CONTAINER_IDS[@]}"; do
+        if [[ "${SELECT_STATUS[i]}" == "ON" ]]; then
+          SELECTED_CONTAINERS+="${CONTAINER_IDS[i]} "
+        fi
+      done
+      SELECTED_CONTAINERS="${SELECTED_CONTAINERS% }" # Remove trailing space
+      break
+    else
+      # Update selection status based on user's choices
+      for i in "${!CONTAINER_IDS[@]}"; do
+        if [[ "$CHOICE" == *"${CONTAINER_IDS[i]}"* ]]; then
+          SELECT_STATUS[i]="ON"
+        else
+          SELECT_STATUS[i]="OFF"
+        fi
+      done
+      continue # Show the menu again with updated selections
+    fi
+  done
+fi
 
 if [ -z "$SELECTED_CONTAINERS" ]; then
   echo -e "${RD}[Warning]${CL} No containers selected. Exiting."
