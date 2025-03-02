@@ -62,9 +62,9 @@ fi
 while true; do
   # Build the menu items with current selection status
   MENU_ITEMS=()
-  MENU_ITEMS+=("SELECTALL" "--- SELECT ALL CONTAINERS ---" "")
-  MENU_ITEMS+=("DESELECTALL" "--- DESELECT ALL CONTAINERS ---" "")
-  MENU_ITEMS+=("CONTINUE" "--- CONTINUE WITH CURRENT SELECTION ---" "")
+  MENU_ITEMS+=("SELECTALL" "--- SELECT ALL CONTAINERS ---" "OFF")
+  MENU_ITEMS+=("DESELECTALL" "--- DESELECT ALL CONTAINERS ---" "OFF")
+  MENU_ITEMS+=("CONTINUE" "--- CONTINUE WITH CURRENT SELECTION ---" "OFF")
 
   # Add containers with their current select status
   for i in "${!CONTAINER_IDS[@]}"; do
@@ -95,7 +95,7 @@ while true; do
     done
     continue
   elif [[ "$CHOICE" == *"CONTINUE"* ]]; then
-    # Process selected containers
+    # Process selected containers based on current SELECT_STATUS
     SELECTED_CONTAINERS=""
     for i in "${!CONTAINER_IDS[@]}"; do
       if [[ "${SELECT_STATUS[i]}" == "ON" ]]; then
@@ -105,9 +105,15 @@ while true; do
     SELECTED_CONTAINERS="${SELECTED_CONTAINERS% }" # Remove trailing space
     break
   else
-    # Use direct selection from user
-    SELECTED_CONTAINERS=$CHOICE
-    break
+    # Update selection status based on user's choices
+    for i in "${!CONTAINER_IDS[@]}"; do
+      if [[ "$CHOICE" == *"${CONTAINER_IDS[i]}"* ]]; then
+        SELECT_STATUS[i]="ON"
+      else
+        SELECT_STATUS[i]="OFF"
+      fi
+    done
+    continue # Show the menu again with updated selections
   fi
 done
 
